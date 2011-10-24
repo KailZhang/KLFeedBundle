@@ -131,7 +131,7 @@ abstract class Activity implements \Serializable
     
     /**
      * default template that the activity will be rendered in,
-     * follow symfony's routine like PaiqooUserBundle:Activity:UpdateResidence.html.twig
+     * follow symfony's routine like PaiqooFeedBundle:Activity:UpdateResidence.html.twig
      * 
      * @return string
      */
