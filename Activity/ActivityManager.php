@@ -4,6 +4,7 @@ namespace KL\FeedBundle\Activity;
 
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use KL\FeedBundle\User\UserManagerInterface;
+use KL\FeedBundle\Event\PreSaveActivityEvent;
 
 /**
  *
@@ -144,6 +145,8 @@ class ActivityManager
     }
 
     /**
+     * Dispatch kl_feed.pre_save_activity event before save activity
+     * 
      * Activities are stored as:
      * activity itself e.g.
      * act:2 => data
@@ -158,6 +161,11 @@ class ActivityManager
      */
     public function save(Activity $act)
     {
+    	if ($this->redis == null) {
+    		// nothing can be done without redis, babe
+    		return;
+    	}
+    	
         $act_id = $act->getId();
         if ($act_id == null) {
             $act_id = (int)$this->redis->get(self::ACTIVITY_ID);
@@ -175,14 +183,17 @@ class ActivityManager
             $act->setType($act_type);
         }
         if ($act->getPublisher() == null) {
-            $current_user = $this->container->get('security.context')->getToken()->getUser();
-            $act->setPublisher($current_user);
+            $userId = $this->container->get('security.context')->getToken()->getUser()->getId();
+            $act->setPublisher($userId);
         }
         if ($act->getCreatedAt() == null) {
             $act->setCreatedAt(time());
         }
 
         // $act_types = $this->container->getParameter('kl_feed.types');
+        
+        $this->container->get('event_dispatcher')
+                        ->dispatch('kl_feed.pre_save_activity', new PreSaveActivityEvent($act));
 
         $am = $this;
         $this->redis->pipeline(function($pipe) use ($act, $am) {
@@ -195,6 +206,9 @@ class ActivityManager
             $pipe->lpush($am->getPublishedFeedKey($publisher), $act_key);
 
             $subscribers = $act->getSubscribers();
+            if (empty($subscribers)) {
+            	return;
+            }
             if ($act instanceof ActionXYZActivity) {
                 $actionXYZ_ref = $act->getActivityGroupRef();
                 $pipe->lpush($actionXYZ_ref, $act_key);
@@ -222,17 +236,17 @@ class ActivityManager
             // @todo push subscribers to list activity:subscribers
         });
     }
-
-    public function render(Activity $act)
-    {
-        $template = $act->getTemplate();
-        return $this->container->get('templating')->render(
-            $template
-        );
-    }
-
+    
+    /**
+     * Render activities, do merge if necessary
+     * 
+     * @param array $acts
+     * @return array
+     */
     public function renderActivities($acts)
     {
+    	if (empty($acts)) return '';
+    	
         $umId = $this->container->getParameter('kl_feed.usermanager_service');
         $um = $this->container->get($umId);
         if (!($um instanceof UserManagerInterface)) {
@@ -250,8 +264,55 @@ class ActivityManager
             }
         }
         $uids = array_unique($uids);
-        $publishers = $um->getUsersById($uids);
+        $allPublishers = $um->getUsersById($uids);
         
-        // @todo merge, render
+        $actRenderings = array();
+        $tplVariables = array();
+        foreach ($acts as $act_grp) {
+        	$template = null;
+        	if (is_array($act_grp)) {
+        		$act1 = $act_grp[0];
+        		$template = $act1->getTemplate();
+        		if ($act1 instanceof ABCActionActivity) {
+        			$publishers = array();
+        			foreach ($act_grp as $act) {
+        				$publishers[] = $allPublishers[$act->getPublisher()];
+        			}
+        			$tplVariables = array(
+        			    'type'       => $act1->getType(),
+        			    'publishers' => $publishers,
+        			    'created_at' => $act1->getCreatedAt(),
+        			    'target'     => $act1->getData(),
+        			);
+        		} else if ($act1 instanceof ActionXYZActivity) {
+        			$targets = array();
+        		    foreach ($act_grp as $act) {
+                        $targets[] = $act->getData();
+                    }
+                    $tplVariables = array(
+                        'type'       => $act1->getType(),
+                        'publisher'  => $allPublishers[$act1->getPublisher()],
+                        'created_at' => $act1->getCreatedAt(),
+                        'targets'    => $targets,
+                    );
+        		}
+        	} else {
+                $act = $act_grp;
+                $template = $act->getTemplate();
+                $tplVariables = array(
+                    'type'       => $act->getType(),
+                    'publisher'  => $allPublishers[$act->getPublisher()],
+                    'created_at' => $act->getCreatedAt(),
+                    'target'     => $act->getData(),
+                );
+            }
+        	
+	        $actRenderings[] = $this->container->get('templating')->render(
+	            $template,
+	            $tplVariables
+	        );
+        }
+        
+        return $actRenderings;
     }
 }

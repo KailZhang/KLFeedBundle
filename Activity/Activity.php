@@ -111,7 +111,7 @@ abstract class Activity implements \Serializable
     
     public function getSubscribers()
     {
-        return $this->subscribers;
+    	return $this->subscribers;
     }
     
     public function setSubscribers($subscribers)
@@ -127,6 +127,17 @@ abstract class Activity implements \Serializable
     public function setCreatedAt($created_at)
     {
         $this->created_at = $created_at;
+    }
+    
+    /**
+     * Called on rendering in ActivityManager
+     * you CAN update this on rendering if you really want
+     * 
+     * @return array
+     */
+    public function getData()
+    {
+    	return $this->data;
     }
     
     /**
