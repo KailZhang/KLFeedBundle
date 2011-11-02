@@ -264,7 +264,7 @@ class ActivityManager
             }
         }
         $uids = array_unique($uids);
-        $allPublishers = $um->getUsersById($uids);
+        $allPublishers = $um->findUsersById($uids);
         
         $actRenderings = array();
         $tplVariables = array();

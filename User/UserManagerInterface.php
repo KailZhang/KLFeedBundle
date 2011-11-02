@@ -10,5 +10,5 @@ interface UserManagerInterface
      * @param array $ids
      * @return array
      */
-    function getUsersById($ids);
+    function findUsersById($ids);
 }
