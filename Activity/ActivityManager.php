@@ -71,9 +71,9 @@ class ActivityManager
      */
     public function getFeedPublishedBy($user, $start = 0, $nb = 20)
     {
-        $feed_key = $this->getPublishedFeedKey($user);
-        $act_keys = $this->redis->lrange($feed_key, $start, $nb);
-        $serialized_acts = $this->redis->mget($act_keys);
+        $feedKey = $this->getPublishedFeedKey($user);
+        $actKeys = $this->redis->lrange($feedKey, $start, $nb);
+        $serialized_acts = $this->redis->mget($actKeys);
         $acts = array();
         foreach ($serialized_acts as $serialized_act) {
             $acts[] = unserialize($serialized_act);
@@ -92,49 +92,49 @@ class ActivityManager
      */
     public function getFeedSubscribedBy($user, $start = 0, $nb = 20)
     {
-        $feed_key = $this->getSubscribedFeedKey($user);
-        $act_refs = $this->redis->lrange($feed_key, $start, $nb);
-        $act_ref_types = $this->redis->pipeline(function($pipe) use ($act_refs) {
-            foreach ($act_refs as $act_ref) {
-                $pipe->type($act_ref);
+        $feedKey = $this->getSubscribedFeedKey($user);
+        $actRefs = $this->redis->lrange($feedKey, $start, $nb);
+        $actRefTypes = $this->redis->pipeline(function($pipe) use ($actRefs) {
+            foreach ($actRefs as $actRef) {
+                $pipe->type($actRef);
             }
         }); // string or list
 
-        // chances are $act_keys is 2-dimension array
-        $act_keys = $this->redis->pipeline(function($pipe) use ($act_refs, $act_ref_types) {
+        // chances are $actKeys is 2-dimension array
+        $actKeys = $this->redis->pipeline(function($pipe) use ($actRefs, $actRefTypes) {
             $index = 0;
-            foreach ($act_refs as $act_ref) {
-                if ($act_ref_types[$index] == 'list') {
-                    $pipe->lrange($act_ref, 0, -1);
+            foreach ($actRefs as $actRef) {
+                if ($actRefTypes[$index] == 'list') {
+                    $pipe->lrange($actRef, 0, -1);
                 } else {
-                    $pipe->echo($act_ref);
+                    $pipe->echo($actRef);
                 }
                 ++$index;
             }
         });
-        unset($act_refs);
-        unset($act_ref_types);
+        unset($actRefs);
+        unset($actRefTypes);
 
         // chances are $serialized_acts is 2-dimension array
-        $serialized_acts = $this->redis->pipeline(function($pipe) use ($act_keys) {
-            foreach ($act_keys as $act_key) {
-                if (is_array($act_key)) {
-                    $pipe->mget($act_key);
+        $serialized_acts = $this->redis->pipeline(function($pipe) use ($actKeys) {
+            foreach ($actKeys as $actKey) {
+                if (is_array($actKey)) {
+                    $pipe->mget($actKey);
                 } else {
-                    $pipe->get($act_key);
+                    $pipe->get($actKey);
                 }
             }
         });
-        unset($act_keys);
+        unset($actKeys);
 
         $acts = array();
         foreach ($serialized_acts as $serialized_act) {
             if (is_array($serialized_act)) {
-                $act_grp = array();
+                $actGrp = array();
                 foreach ($serialized_act as $ref_sact) {
-                    $act_grp[] = unserialize($ref_sact);
+                    $actGrp[] = unserialize($ref_sact);
                 }
-                $acts[] = $act_grp;
+                $acts[] = $actGrp;
             } else {
                 $acts[] = unserialize($serialized_act);
             }
@@ -166,10 +166,10 @@ class ActivityManager
     		return;
     	}
     	
-        $act_id = $act->getId();
-        if ($act_id == null) {
-            $act_id = (int)$this->redis->get(self::ACTIVITY_ID);
-            $act->setId($act_id);
+        $actId = $act->getId();
+        if ($actId == null) {
+            $actId = (int)$this->redis->get(self::ACTIVITY_ID);
+            $act->setId($actId);
         }
         if ($act->getType() == null) {
             $act_types = $this->container->getParameter('kl_feed.types');
@@ -197,13 +197,15 @@ class ActivityManager
 
         $am = $this;
         $this->redis->pipeline(function($pipe) use ($act, $am) {
-            $act_id = $act->getId();
-            $act_key = "act:$act_id";
-            $pipe->set($act_key, serialize($act));
+            $actKey = $act->generateKey();
+            $actId = $act->getId();
+            $actKeyId = "act:$actId";
+            $pipe->set($actKeyId, $actKey);
+            $pipe->set($actKey, serialize($act));
             $pipe->incr(ActivityManager::ACTIVITY_ID);
 
             $publisher = $act->getPublisher();
-            $pipe->lpush($am->getPublishedFeedKey($publisher), $act_key);
+            $pipe->lpush($am->getPublishedFeedKey($publisher), $actKey);
 
             $subscribers = $act->getSubscribers();
             if (empty($subscribers)) {
@@ -211,25 +213,25 @@ class ActivityManager
             }
             if ($act instanceof ActionXYZActivity) {
                 $actionXYZ_ref = $act->getActivityGroupRef();
-                $pipe->lpush($actionXYZ_ref, $act_key);
+                $pipe->lpush($actionXYZ_ref, $actKey);
                 foreach ($subscribers as $subscriber) {
-                    $feed_key = $am->getSubscribedFeedKey($subscriber);
-                    $pipe->lrem($feed_key, 1, $actionXYZ_ref);
-                    $pipe->lpush($feed_key, $actionXYZ_ref);
+                    $feedKey = $am->getSubscribedFeedKey($subscriber);
+                    $pipe->lrem($feedKey, 1, $actionXYZ_ref);
+                    $pipe->lpush($feedKey, $actionXYZ_ref);
                 }
             } else if ($act instanceof ABCActionActivity) {
                 foreach ($subscribers as $subscriber) {
-                    $feed_key = $am->getSubscribedFeedKey($subscriber);
+                    $feedKey = $am->getSubscribedFeedKey($subscriber);
                     $abcAction_ref = $act->getActivityGroupRef($subscriber);
-                    $pipe->lpush($abcAction_ref, $act_key);
+                    $pipe->lpush($abcAction_ref, $actKey);
 
-                    $pipe->lrem($feed_key, 1, $abcAction_ref);
-                    $pipe->lpush($feed_key, $abcAction_ref);
+                    $pipe->lrem($feedKey, 1, $abcAction_ref);
+                    $pipe->lpush($feedKey, $abcAction_ref);
                 }
             } else {
                 foreach ($subscribers as $subscriber) {
-                    $feed_key = $am->getSubscribedFeedKey($subscriber);
-                    $pipe->lpush($feed_key, $act_key);
+                    $feedKey = $am->getSubscribedFeedKey($subscriber);
+                    $pipe->lpush($feedKey, $actKey);
                 }
             }
 
@@ -241,7 +243,7 @@ class ActivityManager
      * Remove activity key from feed,
      * and remove activity itself
      * 
-     * BEWARE, if time like date is taken into merge or key,
+     * !IMPORTANT, if time like date is taken into merge or key,
      * then the activity will not be deleted except its created
      * in the same time span
      * 
@@ -255,13 +257,25 @@ class ActivityManager
             return;
         }
         
+        $am = $this;
         $existAct = unserialize($existAct);
-        $this->redis->pipeline(function($pipe) use ($actKey, $existAct) {
+        $this->redis->pipeline(function($pipe) use ($actKey, $existAct, $am) {
             $subscribers = $existAct->getSubscribers();
-            foreach ($subscribers as $subscriber) {
-                $feed_key = $am->getSubscribedFeedKey($subscriber);
-                $pipe->lrem($feed_key, 1, $actKey);
+            if ($existAct instanceof ActionXYZActivity) {
+                $actionXYZ_ref = $existAct->getActivityGroupRef();
+                $pipe->lrem($actionXYZ_ref, 1, $actKey);
+            } else if ($existAct instanceof ABCActionActivity) {
+                foreach ($subscribers as $subscriber) {
+                    $abcAction_ref = $existAct->getActivityGroupRef($subscriber);
+                    $pipe->lrem($abcAction_ref, 1, $actKey);
+                }
+            } else {
+                foreach ($subscribers as $subscriber) {
+                    $feedKey = $am->getSubscribedFeedKey($subscriber);
+                    $pipe->lrem($feedKey, 1, $actKey);
+                }                
             }
+            
             $pipe->del($actKey);
         }
     }
@@ -283,13 +297,13 @@ class ActivityManager
         }
 
         $uids = array();
-        foreach ($acts as $act_grp) {
-            if (is_array($act_grp)) {
-                foreach ($act_grp as $act) {
+        foreach ($acts as $actGrp) {
+            if (is_array($actGrp)) {
+                foreach ($actGrp as $act) {
                     $uids[] = $act->getPublisher();
                 }
             } else {
-                $uids[] = $act_grp->getPublisher();
+                $uids[] = $actGrp->getPublisher();
             }
         }
         $uids = array_unique($uids);
@@ -297,14 +311,14 @@ class ActivityManager
         
         $actRenderings = array();
         $tplVariables = array();
-        foreach ($acts as $act_grp) {
+        foreach ($acts as $actGrp) {
         	$template = null;
-        	if (is_array($act_grp)) {
-        		$act1 = $act_grp[0];
+        	if (is_array($actGrp)) {
+        		$act1 = $actGrp[0];
         		$template = $act1->getTemplate();
         		if ($act1 instanceof ABCActionActivity) {
         			$publishers = array();
-        			foreach ($act_grp as $act) {
+        			foreach ($actGrp as $act) {
         				$publishers[] = $allPublishers[$act->getPublisher()];
         			}
         			$tplVariables = array(
@@ -315,7 +329,7 @@ class ActivityManager
         			);
         		} else if ($act1 instanceof ActionXYZActivity) {
         			$targets = array();
-        		    foreach ($act_grp as $act) {
+        		    foreach ($actGrp as $act) {
                         $targets[] = $act->getData();
                     }
                     $tplVariables = array(
@@ -326,7 +340,7 @@ class ActivityManager
                     );
         		}
         	} else {
-                $act = $act_grp;
+                $act = $actGrp;
                 $template = $act->getTemplate();
                 $tplVariables = array(
                     'type'       => $act->getType(),
