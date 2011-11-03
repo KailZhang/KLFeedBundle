@@ -158,8 +158,8 @@ abstract class Activity implements \Serializable
     }
     
     /**
-     * Generate redis key, which is holding the activity
-     * It's generated from type, publisher, data, created_at etc
+     * Generate activity key, which is holding the activity
+     * It's generated from type, publisher, data(target), created_at etc
      * 
      * NOTE: generateKey is also used on activity that is unserialized from
      *       redis, so if you use any property rather than listed above. You

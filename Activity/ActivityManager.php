@@ -145,6 +145,18 @@ class ActivityManager
     }
 
     /**
+     * The parameter key is in biz domain,
+     * The returned one is the actual key that will hold activity data in redis
+     * 
+     * @param string $actKey
+     * @return string
+     */
+    public function getActivityRedisKey($actKey)
+    {
+        return "act[$actKey]";
+    }
+    
+    /**
      * Dispatch kl_feed.pre_save_activity event before save activity
      * 
      * Activities are stored as:
@@ -166,6 +178,7 @@ class ActivityManager
     		return;
     	}
     	
+    	// $actId is not used any more...
         $actId = $act->getId();
         if ($actId == null) {
             $actId = (int)$this->redis->get(self::ACTIVITY_ID);
@@ -192,16 +205,21 @@ class ActivityManager
 
         // $act_types = $this->container->getParameter('kl_feed.types');
         
-        $this->container->get('event_dispatcher')
-                        ->dispatch('kl_feed.pre_save_activity', new PreSaveActivityEvent($act));
-
+        $eventDispatcher = $this->container->get('event_dispatcher');
+        $eventDispatcher->dispatch('kl_feed.pre_save_activity', new PreSaveActivityEvent($act));
+        
+        // @todo if actKey already exist, delete it first
+        $actKey = $act->generateKey();
+        // if ($this->redis->get($actKey) // delete will check whether it exists or not
+        $this->delete($actKey);
+        
         $am = $this;
-        $this->redis->pipeline(function($pipe) use ($act, $am) {
-            $actKey = $act->generateKey();
-            $actId = $act->getId();
-            $actKeyId = "act:$actId";
-            $pipe->set($actKeyId, $actKey);
+        $this->redis->pipeline(function($pipe) use ($act, $actKey, $am) {
+            $actKey = $am->getActivityRedisKey($actKey);
             $pipe->set($actKey, serialize($act));
+            //$actId = $act->getId();
+            //$actKeyId = "act:$actId";
+            //$pipe->set($actKeyId, $actKey);
             $pipe->incr(ActivityManager::ACTIVITY_ID);
 
             $publisher = $act->getPublisher();
@@ -234,8 +252,6 @@ class ActivityManager
                     $pipe->lpush($feedKey, $actKey);
                 }
             }
-
-            // @todo push subscribers to list activity:subscribers
         });
     }
     
@@ -247,11 +263,13 @@ class ActivityManager
      * then the activity will not be deleted except its created
      * in the same time span
      * 
-     * @param Activity $act
+     * @param string $actKey
      */
-    public function delete(Activity $act)
+    public function delete($actKey)
     {
-        $actKey = $act->generateKey();
+        $actKey = $this->getActivityRedisKey($actKey);
+        
+        // $actKey = $act->generateKey();
         $existAct = $this->redis->get($actKey);
         if ($existAct == null) {
             return;
