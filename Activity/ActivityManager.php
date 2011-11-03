@@ -277,7 +277,7 @@ class ActivityManager
             }
             
             $pipe->del($actKey);
-        }
+        });
     }
     
     /**
