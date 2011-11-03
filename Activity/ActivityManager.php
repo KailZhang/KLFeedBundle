@@ -46,7 +46,7 @@ class ActivityManager
      */
     public function getSubscribedFeedKey($subscriber)
     {
-        return "sub:$subscriber:feed";
+        return "sub:$subscriber:fd";
     }
 
     /**
@@ -57,7 +57,7 @@ class ActivityManager
      */
     public function getPublishedFeedKey($publisher)
     {
-        return "pub:$publisher:feed";
+        return "pub:$publisher:fd";
     }
 
     // @todo from redis or from rdbms, or both
@@ -157,7 +157,7 @@ class ActivityManager
      * user published feed e.g.
      * pub:3:feed => act:11,act:8,act:7,act:3,act:2
      *
-     * @param $act
+     * @param Activity $act
      */
     public function save(Activity $act)
     {
@@ -235,6 +235,35 @@ class ActivityManager
 
             // @todo push subscribers to list activity:subscribers
         });
+    }
+    
+    /**
+     * Remove activity key from feed,
+     * and remove activity itself
+     * 
+     * BEWARE, if time like date is taken into merge or key,
+     * then the activity will not be deleted except its created
+     * in the same time span
+     * 
+     * @param Activity $act
+     */
+    public function delete(Activity $act)
+    {
+        $actKey = $act->generateKey();
+        $existAct = $this->redis->get($actKey);
+        if ($existAct == null) {
+            return;
+        }
+        
+        $existAct = unserialize($existAct);
+        $this->redis->pipeline(function($pipe) use ($actKey, $existAct) {
+            $subscribers = $existAct->getSubscribers();
+            foreach ($subscribers as $subscriber) {
+                $feed_key = $am->getSubscribedFeedKey($subscriber);
+                $pipe->lrem($feed_key, 1, $actKey);
+            }
+            $pipe->del($actKey);
+        }
     }
     
     /**

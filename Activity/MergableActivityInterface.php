@@ -5,13 +5,11 @@ namespace KL\FeedBundle\Activity;
 interface MergableActivityInterface
 {
     /**
-     * string that can identify the invariant part of the activity, e.g.
-     * AAction(Type) of AActionXYZ, Action(Type)X of ABCActionX,
-     * and what will be merged are variable parts
+     * Activities of same type, same merge clue will be merged
      * 
      * @return string
      */
-    public function getInvariantIdentifier();
+    public function getMergeClue();
     
     /**
      * redis key holding keys of activities that will be merged

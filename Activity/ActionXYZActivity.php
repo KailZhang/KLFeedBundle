@@ -6,11 +6,9 @@ abstract class ActionXYZActivity extends Activity implements MergableActivityInt
 {
     public function getActivityGroupRef($subscriber = null)
     {
-        $inv_id = $this->getInvariantIdentifier();
-        $today = date('ymd', time());
-        $ref_str = "$inv_id:$today";
+        $mergeClue = $this->getMergeClue();
         $type = $this->getType();
-        $act_ref = "act:[$type:$ref_str]";
+        $act_ref = "act:[$type:$mergeClue]";
         
         return $act_ref;
     }

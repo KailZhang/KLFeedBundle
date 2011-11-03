@@ -62,6 +62,7 @@ abstract class Activity implements \Serializable
             'publisher' => $this->publisher,
             'created_at' => $this->created_at,
             'data' => $this->data,
+            'subscribers' => $this->subscribers,
         );
         return serialize($data_stream);
     }
@@ -75,6 +76,7 @@ abstract class Activity implements \Serializable
         $this->publisher = $data_stream['publisher'];
         $this->created_at = $data_stream['created_at'];
         $this->data = $data_stream['data'];
+        $this->subscribers = $data_stream['subscribers'];
     }
     
     public function getId()
@@ -154,4 +156,16 @@ abstract class Activity implements \Serializable
         $cls_name = substr($cls_name, 0, strrpos($cls_name, 'Activity'));
         return "$bundle_name:Activity:$cls_name.html.twig";
     }
+    
+    /**
+     * Generate redis key, which is holding the activity
+     * It's generated from type, publisher, data, created_at etc
+     * 
+     * NOTE: generateKey is also used on activity that is unserialized from
+     *       redis, so if you use any property rather than listed above. You
+     *       need serialize it into data or overwrite serialize/unserialize
+     * 
+     * @return string
+     */
+    abstract public function generateKey();
 }
