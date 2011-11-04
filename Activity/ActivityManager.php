@@ -343,12 +343,12 @@ class ActivityManager
         			    'type'       => $act1->getType(),
         			    'publishers' => $publishers,
         			    'created_at' => $act1->getCreatedAt(),
-        			    'target'     => $act1->getData(),
+        			    'target'     => $act1->getTarget(),
         			);
         		} else if ($act1 instanceof ActionXYZActivity) {
         			$targets = array();
         		    foreach ($actGrp as $act) {
-                        $targets[] = $act->getData();
+                        $targets[] = $act->getTarget();
                     }
                     $tplVariables = array(
                         'type'       => $act1->getType(),
@@ -364,7 +364,7 @@ class ActivityManager
                     'type'       => $act->getType(),
                     'publisher'  => $allPublishers[$act->getPublisher()],
                     'created_at' => $act->getCreatedAt(),
-                    'target'     => $act->getData(),
+                    'target'     => $act->getTarget(),
                 );
             }
         	

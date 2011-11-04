@@ -38,7 +38,7 @@ abstract class Activity implements \Serializable
      * 
      * @var array
      */
-    protected $data;
+    protected $target;
     
     /**
      * timestamp
@@ -61,7 +61,7 @@ abstract class Activity implements \Serializable
             'type' => $this->type,
             'publisher' => $this->publisher,
             'created_at' => $this->created_at,
-            'data' => $this->data,
+            'target' => $this->target,
             'subscribers' => $this->subscribers,
         );
         return serialize($data_stream);
@@ -75,7 +75,7 @@ abstract class Activity implements \Serializable
         $this->type = $data_stream['type'];
         $this->publisher = $data_stream['publisher'];
         $this->created_at = $data_stream['created_at'];
-        $this->data = $data_stream['data'];
+        $this->target = $data_stream['target'];
         $this->subscribers = $data_stream['subscribers'];
     }
     
@@ -137,9 +137,9 @@ abstract class Activity implements \Serializable
      * 
      * @return array
      */
-    public function getData()
+    public function getTarget()
     {
-    	return $this->data;
+    	return $this->target;
     }
     
     /**
