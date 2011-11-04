@@ -38,7 +38,16 @@ abstract class Activity implements \Serializable
      * 
      * @var array
      */
-    protected $data;
+    protected $target;
+    
+    /**
+     * Used to identify the target
+     * MUSTBE scalar value(s) from $target, or it cannot be 
+     * got from unserialized Activity
+     * 
+     * @var string
+     */
+    protected $targetIdentifier;
     
     /**
      * timestamp
@@ -61,7 +70,7 @@ abstract class Activity implements \Serializable
             'type' => $this->type,
             'publisher' => $this->publisher,
             'created_at' => $this->created_at,
-            'data' => $this->data,
+            'target' => $this->target,
             'subscribers' => $this->subscribers,
         );
         return serialize($data_stream);
@@ -75,7 +84,7 @@ abstract class Activity implements \Serializable
         $this->type = $data_stream['type'];
         $this->publisher = $data_stream['publisher'];
         $this->created_at = $data_stream['created_at'];
-        $this->data = $data_stream['data'];
+        $this->target = $data_stream['target'];
         $this->subscribers = $data_stream['subscribers'];
     }
     
@@ -137,9 +146,9 @@ abstract class Activity implements \Serializable
      * 
      * @return array
      */
-    public function getData()
+    public function getTarget()
     {
-    	return $this->data;
+    	return $this->target;
     }
     
     /**
@@ -158,14 +167,21 @@ abstract class Activity implements \Serializable
     }
     
     /**
-     * Generate activity key, which is holding the activity
-     * It's generated from type, publisher, data(target), created_at etc
      * 
-     * NOTE: generateKey is also used on activity that is unserialized from
-     *       redis, so if you use any property rather than listed above. You
-     *       need serialize it into data or overwrite serialize/unserialize
-     * 
-     * @return string
+     * @param scalar $tid
      */
-    abstract public function generateKey();
+    public function setTargetIdentifier($tid)
+    {
+        $this->targetIdentifier = $tid;
+    }
+    
+    /**
+     * The target identifier MUST be generated from
+     * the target itself
+     * 
+     * can be null if type is enough
+     * 
+     * @return string or null
+     */
+    abstract public function getTargetIdentifier();
 }

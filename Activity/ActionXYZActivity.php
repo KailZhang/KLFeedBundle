@@ -8,7 +8,7 @@ abstract class ActionXYZActivity extends Activity implements MergableActivityInt
     {
         $mergeClue = $this->getMergeClue();
         $type = $this->getType();
-        $act_ref = "act:[$type:$mergeClue]";
+        $act_ref = "act#$type:$mergeClue#";
         
         return $act_ref;
     }

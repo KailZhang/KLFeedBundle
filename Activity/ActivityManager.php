@@ -99,14 +99,15 @@ class ActivityManager
                 $pipe->type($actRef);
             }
         }); // string or list
-
+        
         // chances are $actKeys is 2-dimension array
         $actKeys = $this->redis->pipeline(function($pipe) use ($actRefs, $actRefTypes) {
             $index = 0;
             foreach ($actRefs as $actRef) {
-                if ($actRefTypes[$index] == 'list') {
+                $actRefType = $actRefTypes[$index];
+                if ($actRefType == 'list') {
                     $pipe->lrange($actRef, 0, -1);
-                } else {
+                } else if ($actRefType == 'string') {
                     $pipe->echo($actRef);
                 }
                 ++$index;
@@ -143,17 +144,59 @@ class ActivityManager
 
         return $acts;
     }
-
+    
     /**
-     * The parameter key is in biz domain,
-     * The returned one is the actual key that will hold activity data in redis
      * 
-     * @param string $actKey
+     * @param string $actClsname
+     * @return int
+     */
+    private function _getActivityType($actClsname)
+    {
+        $actTypes = $this->container->getParameter('kl_feed.types');
+        $cls_arr = explode('\\', $actClsname);
+        $actCls = array_pop($cls_arr);
+        if (!in_array($actCls, $actTypes)) {
+            throw new \Exception('Please add activity ' . $actCls . ' to config.yml');
+        }
+        $flippedTypes = array_flip($actTypes);
+        $actType = (int)$flippedTypes[$actCls];
+        
+        return $actType;
+    }
+    
+    /**
+     * 
+     * Arguments order is someone did something at sometime
+     * NOW all activities will be patched date(ymd)
+     * 
+     * @param int $publisher
+     * @param int|string $actTypeOrClsname Activity type or Activity class name
+     * @param scalar $targetIdentifer
+     * @param unknown $timeSpan NOT supported yet
      * @return string
      */
-    public function getActivityRedisKey($actKey)
+    public function generateActivityKey($publisher, $actTypeOrClsname, $targetIdentifier, $timeSpan = null)
     {
-        return "act[$actKey]";
+        $today = date('ymd', time());
+        
+        if (!is_int($actTypeOrClsname)) {
+            $actType = $this->_getActivityType($actTypeOrClsname);
+        } else {
+            $actType = $actTypeOrClsname;
+        }
+        
+        $actKey = "act[$publisher:$actType:$targetIdentifier:$today]";
+        return $actKey;
+    }
+    
+    /**
+     * Convenience method
+     * 
+     * @param Activity $act
+     */
+    private function _generateActivityKey($act)
+    {
+        return $this->generateActivityKey($act->getPublisher(), get_class($act), $act->getTargetIdentifier());
     }
     
     /**
@@ -185,15 +228,8 @@ class ActivityManager
             $act->setId($actId);
         }
         if ($act->getType() == null) {
-            $act_types = $this->container->getParameter('kl_feed.types');
-            $cls_arr = explode('\\', get_class($act));
-            $act_cls = array_pop($cls_arr);
-            if (!in_array($act_cls, $act_types)) {
-                throw new \Exception('Please add activity ' . $act_cls . ' to config.yml');
-            }
-            $flipped_types = array_flip($act_types);
-            $act_type = $flipped_types[$act_cls];
-            $act->setType($act_type);
+            $actType = $this->_getActivityType(get_class($act));
+            $act->setType($actType);
         }
         if ($act->getPublisher() == null) {
             $userId = $this->container->get('security.context')->getToken()->getUser()->getId();
@@ -203,19 +239,18 @@ class ActivityManager
             $act->setCreatedAt(time());
         }
 
-        // $act_types = $this->container->getParameter('kl_feed.types');
+        // $actTypes = $this->container->getParameter('kl_feed.types');
         
         $eventDispatcher = $this->container->get('event_dispatcher');
         $eventDispatcher->dispatch('kl_feed.pre_save_activity', new PreSaveActivityEvent($act));
         
-        // @todo if actKey already exist, delete it first
-        $actKey = $act->generateKey();
+        // if actKey already exist, delete it first
+        $actKey = $this->_generateActivityKey($act);
         // if ($this->redis->get($actKey) // delete will check whether it exists or not
         $this->delete($actKey);
         
         $am = $this;
         $this->redis->pipeline(function($pipe) use ($act, $actKey, $am) {
-            $actKey = $am->getActivityRedisKey($actKey);
             $pipe->set($actKey, serialize($act));
             //$actId = $act->getId();
             //$actKeyId = "act:$actId";
@@ -263,11 +298,16 @@ class ActivityManager
      * then the activity will not be deleted except its created
      * in the same time span
      * 
-     * @param string $actKey
+     * @param string|Activity $actKeyOrObj
      */
-    public function delete($actKey)
+    public function delete($actKeyOrObj)
     {
-        $actKey = $this->getActivityRedisKey($actKey);
+        $actKey = null;
+        if ($actKeyOrObj instanceof Activity) {
+            $actKey = $this->_generateActivityKey($actKeyOrObj);
+        } else {
+            $actKey = $actKeyOrObj;
+        }
         
         // $actKey = $act->generateKey();
         $existAct = $this->redis->get($actKey);
@@ -343,12 +383,12 @@ class ActivityManager
         			    'type'       => $act1->getType(),
         			    'publishers' => $publishers,
         			    'created_at' => $act1->getCreatedAt(),
-        			    'target'     => $act1->getData(),
+        			    'target'     => $act1->getTarget(),
         			);
         		} else if ($act1 instanceof ActionXYZActivity) {
         			$targets = array();
         		    foreach ($actGrp as $act) {
-                        $targets[] = $act->getData();
+                        $targets[] = $act->getTarget();
                     }
                     $tplVariables = array(
                         'type'       => $act1->getType(),
@@ -364,7 +404,7 @@ class ActivityManager
                     'type'       => $act->getType(),
                     'publisher'  => $allPublishers[$act->getPublisher()],
                     'created_at' => $act->getCreatedAt(),
-                    'target'     => $act->getData(),
+                    'target'     => $act->getTarget(),
                 );
             }
         	
