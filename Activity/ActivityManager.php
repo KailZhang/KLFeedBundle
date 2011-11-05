@@ -320,15 +320,46 @@ class ActivityManager
         
         $am = $this;
         $existAct = unserialize($existAct);
-        $this->redis->pipeline(function($pipe) use ($actKey, $existAct, $am) {
+        
+        $grpCount = 100;
+        if ($existAct instanceof ActionXYZActivity) {
+            $actGroupRef = $existAct->getActivityGroupRef();
+            $grpCount = $this->redis->llen($actGroupRef);
+        } else if ($existAct instanceof ABCActionActivity) {
+            $grpCount = $this->redis->pipeline(function($pipe) use ($actKey, $existAct, $am) {
+                $subscribers = $existAct->getSubscribers();
+                foreach ($subscribers as $subscriber) {
+                    $feedKey = $am->getSubscribedFeedKey($subscriber);
+                    $actGroupRef = $existAct->getActivityGroupRef($subscriber);
+                    $pipe->llen($actGroupRef);
+                }
+            });
+        }
+        
+        $this->redis->pipeline(function($pipe) use ($actKey, $existAct, $am, $grpCount) {
             $subscribers = $existAct->getSubscribers();
             if ($existAct instanceof ActionXYZActivity) {
-                $actionXYZ_ref = $existAct->getActivityGroupRef();
-                $pipe->lrem($actionXYZ_ref, 1, $actKey);
+                $actGroupRef = $existAct->getActivityGroupRef();
+                $pipe->lrem($actGroupRef, 1, $actKey);
+                
+                // the group will be empty if the activity is deleted
+                if ($grpCount == 1) {
+                    $subscribers = $existAct->getSubscribers();
+                    foreach ($subscribers as $subscriber) {
+                        $feedKey = $am->getSubscribedFeedKey($subscriber);
+                        $pipe->lrem($feedKey, 1, $actGroupRef);
+                    }
+                }
             } else if ($existAct instanceof ABCActionActivity) {
-                foreach ($subscribers as $subscriber) {
-                    $abcAction_ref = $existAct->getActivityGroupRef($subscriber);
-                    $pipe->lrem($abcAction_ref, 1, $actKey);
+                for ($i=0, $c=count($subscribers); $i<$c; ++$i) {
+                    $subscriber = $subscribers[$i];
+                    $actGroupRef = $existAct->getActivityGroupRef($subscriber);
+                    $pipe->lrem($actGroupRef, 1, $actKey);
+                    
+                    if ($grpCount[$i] == 1) {
+                        $feedKey = $am->getSubscribedFeedKey($subscriber);
+                        $pipe->lrem($feedKey, 1, $actGroupRef);
+                    }
                 }
             } else {
                 foreach ($subscribers as $subscriber) {
