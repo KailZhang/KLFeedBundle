@@ -121,6 +121,7 @@ class ActivityManager
         // chances are $serialized_acts is 2-dimension array
         $serialized_acts = $this->redis->pipeline(function($pipe) use ($actKeys) {
             foreach ($actKeys as $actKey) {
+                if (empty($actKey) continue;
                 if (is_array($actKey)) {
                     $pipe->mget($actKey);
                 } else {
