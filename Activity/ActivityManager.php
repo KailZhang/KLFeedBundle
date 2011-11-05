@@ -73,10 +73,12 @@ class ActivityManager
     {
         $feedKey = $this->getPublishedFeedKey($user);
         $actKeys = $this->redis->lrange($feedKey, $start, $nb);
-        $serialized_acts = $this->redis->mget($actKeys);
         $acts = array();
-        foreach ($serialized_acts as $serialized_act) {
-            $acts[] = unserialize($serialized_act);
+        if (!empty($actKeys)) {
+            $serialized_acts = $this->redis->mget($actKeys);
+            foreach ($serialized_acts as $serialized_act) {
+                $acts[] = unserialize($serialized_act);
+            }
         }
 
         return $acts;
