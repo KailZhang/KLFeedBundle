@@ -439,29 +439,18 @@ class ActivityManager
         	if (is_array($actGrp)) {
         		$act1 = $actGrp[0];
         		$template = $act1->getTemplate();
-        		if ($act1 instanceof ABCActionActivity) {
-        			$publishers = array();
-        			foreach ($actGrp as $act) {
-        				$publishers[] = $allPublishers[$act->getPublisher()];
-        			}
-        			$tplVariables = array(
-        			    'type'       => $act1->getType(),
-        			    'publishers' => $publishers,
-        			    'when'       => $act1->getCreatedAt(),
-        			    'targets'    => array($act1->getTarget()),
-        			);
-        		} else if ($act1 instanceof ActionXYZActivity) {
-        			$targets = array();
-        		    foreach ($actGrp as $act) {
-                        $targets[] = $act->getTarget();
-                    }
-                    $tplVariables = array(
-                        'type'       => $act1->getType(),
-                        'publishers' => array($allPublishers[$act1->getPublisher()]),
-                        'when'       => $act1->getCreatedAt(),
-                        'targets'    => $targets,
-                    );
-        		}
+        		$publishers = array();
+        		$targets = array();
+        		foreach ($actGrp as $act) {
+        		    $publishers[] = $allPublishers[$act->getPublisher()];
+                    $targets[] = $act->getTarget();
+                }
+                $tplVariables = array(
+                    'type'       => $act1->getType(),
+                    'publishers' => $publishers,
+                    'when'       => $act1->getCreatedAt(),
+                    'targets'    => $targets,
+                );
         	} else {
                 $act = $actGrp;
                 $template = $act->getTemplate();
