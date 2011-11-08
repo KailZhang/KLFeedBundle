@@ -59,6 +59,35 @@ class ActivityManager
     {
         return "pub:$publisher:fd";
     }
+    
+    /**
+     * Redis key whose value is all published activities
+     *
+     * @return string
+     */
+    public function getGlobalFeedKey()
+    {
+        return "global:fd";
+    }
+    
+    private function _getPublishedFeedByKey($feedKey, $start = 0, $nb = 20)
+    {
+        $actKeys = $this->redis->lrange($feedKey, $start, $nb - 1);
+        $acts = array();
+        if (!empty($actKeys)) {
+            $serialized_acts = $this->redis->mget($actKeys);
+            foreach ($serialized_acts as $serialized_act) {
+                $acts[] = unserialize($serialized_act);
+            }
+        }
+
+        return $acts;
+    }
+    
+    public function getGlobalFeed($start = 0, $nb = 20)
+    {
+        return $this->_getPublishedFeedByKey($this->getGlobalFeedKey(), $start, $nb);
+    }
 
     // @todo from redis or from rdbms, or both
 
@@ -72,16 +101,7 @@ class ActivityManager
     public function getFeedPublishedBy($user, $start = 0, $nb = 20)
     {
         $feedKey = $this->getPublishedFeedKey($user);
-        $actKeys = $this->redis->lrange($feedKey, $start, $nb);
-        $acts = array();
-        if (!empty($actKeys)) {
-            $serialized_acts = $this->redis->mget($actKeys);
-            foreach ($serialized_acts as $serialized_act) {
-                $acts[] = unserialize($serialized_act);
-            }
-        }
-
-        return $acts;
+        return $this->_getPublishedFeedByKey($feedKey, $start, $nb);
     }
 
     /**
@@ -95,7 +115,7 @@ class ActivityManager
     public function getFeedSubscribedBy($user, $start = 0, $nb = 20)
     {
         $feedKey = $this->getSubscribedFeedKey($user);
-        $actRefs = $this->redis->lrange($feedKey, $start, $nb);
+        $actRefs = $this->redis->lrange($feedKey, $start, $nb - 1);
         $actRefTypes = $this->redis->pipeline(function($pipe) use ($actRefs) {
             foreach ($actRefs as $actRef) {
                 $pipe->type($actRef);
@@ -252,8 +272,10 @@ class ActivityManager
         // if ($this->redis->get($actKey) // delete will check whether it exists or not
         $this->delete($actKey);
         
+        $globalSub = $this->container->getParameter('kl_feed.global_subscribe');
+        
         $am = $this;
-        $this->redis->pipeline(function($pipe) use ($act, $actKey, $am) {
+        $this->redis->pipeline(function($pipe) use ($act, $actKey, $am, $globalSub) {
             $pipe->set($actKey, serialize($act));
             //$actId = $act->getId();
             //$actKeyId = "act:$actId";
@@ -262,6 +284,10 @@ class ActivityManager
 
             $publisher = $act->getPublisher();
             $pipe->lpush($am->getPublishedFeedKey($publisher), $actKey);
+            
+            if ($globalSub) {
+                $pipe->lpush($am->getGlobalFeedKey(), $actKey);
+            }
 
             $subscribers = $act->getSubscribers();
             if (empty($subscribers)) {
@@ -336,7 +362,12 @@ class ActivityManager
             });
         }
         
-        $this->redis->pipeline(function($pipe) use ($actKey, $existAct, $am, $grpCount) {
+        $globalSub = $this->container->getParameter('kl_feed.global_subscribe');
+        $this->redis->pipeline(function($pipe) use ($actKey, $existAct, $am, $grpCount, $globalSub) {
+            if ($globalSub) {
+                $pipe->lrem($am->getGlobalFeedKey(), 1, $actKey);
+            }
+            
             $subscribers = $existAct->getSubscribers();
             if ($existAct instanceof ActionXYZActivity) {
                 $actGroupRef = $existAct->getActivityGroupRef();
@@ -416,8 +447,8 @@ class ActivityManager
         			$tplVariables = array(
         			    'type'       => $act1->getType(),
         			    'publishers' => $publishers,
-        			    'created_at' => $act1->getCreatedAt(),
-        			    'target'     => $act1->getTarget(),
+        			    'when'       => $act1->getCreatedAt(),
+        			    'targets'    => array($act1->getTarget()),
         			);
         		} else if ($act1 instanceof ActionXYZActivity) {
         			$targets = array();
@@ -426,8 +457,8 @@ class ActivityManager
                     }
                     $tplVariables = array(
                         'type'       => $act1->getType(),
-                        'publisher'  => $allPublishers[$act1->getPublisher()],
-                        'created_at' => $act1->getCreatedAt(),
+                        'publishers' => array($allPublishers[$act1->getPublisher()]),
+                        'when'       => $act1->getCreatedAt(),
                         'targets'    => $targets,
                     );
         		}
@@ -436,9 +467,9 @@ class ActivityManager
                 $template = $act->getTemplate();
                 $tplVariables = array(
                     'type'       => $act->getType(),
-                    'publisher'  => $allPublishers[$act->getPublisher()],
-                    'created_at' => $act->getCreatedAt(),
-                    'target'     => $act->getTarget(),
+                    'publishers' => array($allPublishers[$act->getPublisher()]),
+                    'when'       => $act->getCreatedAt(),
+                    'targets'    => array($act->getTarget()),
                 );
             }
         	

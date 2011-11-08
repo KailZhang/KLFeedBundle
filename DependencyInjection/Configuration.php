@@ -22,6 +22,7 @@ class Configuration implements ConfigurationInterface
 
         $rootNode
             ->children()
+                ->booleanNode('global_subscribe')->defaultFalse()->end()
                 ->scalarNode('usermanager_service')->isRequired()->cannotBeEmpty()->end()
                 ->variableNode('types')
                     ->defaultValue(array())->end()
