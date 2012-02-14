@@ -59,6 +59,35 @@ class ActivityManager
     {
         return "pub:$publisher:fd";
     }
+    
+    /**
+     * Redis key whose value is all published activities
+     *
+     * @return string
+     */
+    public function getGlobalFeedKey()
+    {
+        return "global:fd";
+    }
+    
+    private function _getPublishedFeedByKey($feedKey, $start = 0, $nb = 20)
+    {
+        $actKeys = $this->redis->lrange($feedKey, $start, $nb - 1);
+        $acts = array();
+        if (!empty($actKeys)) {
+            $serialized_acts = $this->redis->mget($actKeys);
+            foreach ($serialized_acts as $serialized_act) {
+                $acts[] = unserialize($serialized_act);
+            }
+        }
+
+        return $acts;
+    }
+    
+    public function getGlobalFeed($start = 0, $nb = 20)
+    {
+        return $this->_getPublishedFeedByKey($this->getGlobalFeedKey(), $start, $nb);
+    }
 
     // @todo from redis or from rdbms, or both
 
@@ -72,14 +101,7 @@ class ActivityManager
     public function getFeedPublishedBy($user, $start = 0, $nb = 20)
     {
         $feedKey = $this->getPublishedFeedKey($user);
-        $actKeys = $this->redis->lrange($feedKey, $start, $nb);
-        $serialized_acts = $this->redis->mget($actKeys);
-        $acts = array();
-        foreach ($serialized_acts as $serialized_act) {
-            $acts[] = unserialize($serialized_act);
-        }
-
-        return $acts;
+        return $this->_getPublishedFeedByKey($feedKey, $start, $nb);
     }
 
     /**
@@ -93,23 +115,25 @@ class ActivityManager
     public function getFeedSubscribedBy($user, $start = 0, $nb = 20)
     {
         $feedKey = $this->getSubscribedFeedKey($user);
-        $actRefs = $this->redis->lrange($feedKey, $start, $nb);
+        $actRefs = $this->redis->lrange($feedKey, $start, $nb - 1);
         if (empty($actRefs)) {
             return array();
         }
+        
         $actRefTypes = $this->redis->pipeline(function($pipe) use ($actRefs) {
             foreach ($actRefs as $actRef) {
                 $pipe->type($actRef);
             }
         }); // string or list
-
+        
         // chances are $actKeys is 2-dimension array
         $actKeys = $this->redis->pipeline(function($pipe) use ($actRefs, $actRefTypes) {
             $index = 0;
             foreach ($actRefs as $actRef) {
-                if ($actRefTypes[$index] == 'list') {
+                $actRefType = $actRefTypes[$index];
+                if ($actRefType == 'list') {
                     $pipe->lrange($actRef, 0, -1);
-                } else {
+                } else if ($actRefType == 'string') {
                     $pipe->echo($actRef);
                 }
                 ++$index;
@@ -125,6 +149,7 @@ class ActivityManager
         // chances are $serialized_acts is 2-dimension array
         $serialized_acts = $this->redis->pipeline(function($pipe) use ($actKeys) {
             foreach ($actKeys as $actKey) {
+                if (empty($actKey)) continue;
                 if (is_array($actKey)) {
                     $pipe->mget($actKey);
                 } else {
@@ -150,17 +175,59 @@ class ActivityManager
 
         return $acts;
     }
-
+    
     /**
-     * The parameter key is in biz domain,
-     * The returned one is the actual key that will hold activity data in redis
      * 
-     * @param string $actKey
+     * @param string $actClsname
+     * @return int
+     */
+    private function _getActivityType($actClsname)
+    {
+        $actTypes = $this->container->getParameter('kl_feed.types');
+        $cls_arr = explode('\\', $actClsname);
+        $actCls = array_pop($cls_arr);
+        if (!in_array($actCls, $actTypes)) {
+            throw new \Exception('Please add activity ' . $actCls . ' to config.yml');
+        }
+        $flippedTypes = array_flip($actTypes);
+        $actType = (int)$flippedTypes[$actCls];
+        
+        return $actType;
+    }
+    
+    /**
+     * 
+     * Arguments order is someone did something at sometime
+     * NOW all activities will be patched date(ymd)
+     * 
+     * @param int $publisher
+     * @param int|string $actTypeOrClsname Activity type or Activity class name
+     * @param scalar $targetIdentifer
+     * @param unknown $timeSpan NOT supported yet
      * @return string
      */
-    public function getActivityRedisKey($actKey)
+    public function generateActivityKey($publisher, $actTypeOrClsname, $targetIdentifier, $timeSpan = null)
     {
-        return "act[$actKey]";
+        $today = date('ymd', time());
+        
+        if (!is_int($actTypeOrClsname)) {
+            $actType = $this->_getActivityType($actTypeOrClsname);
+        } else {
+            $actType = $actTypeOrClsname;
+        }
+        
+        $actKey = "act[$publisher:$actType:$targetIdentifier:$today]";
+        return $actKey;
+    }
+    
+    /**
+     * Convenience method
+     * 
+     * @param Activity $act
+     */
+    private function _generateActivityKey($act)
+    {
+        return $this->generateActivityKey($act->getPublisher(), get_class($act), $act->getTargetIdentifier());
     }
     
     /**
@@ -192,15 +259,8 @@ class ActivityManager
             $act->setId($actId);
         }
         if ($act->getType() == null) {
-            $act_types = $this->container->getParameter('kl_feed.types');
-            $cls_arr = explode('\\', get_class($act));
-            $act_cls = array_pop($cls_arr);
-            if (!in_array($act_cls, $act_types)) {
-                throw new \Exception('Please add activity ' . $act_cls . ' to config.yml');
-            }
-            $flipped_types = array_flip($act_types);
-            $act_type = $flipped_types[$act_cls];
-            $act->setType($act_type);
+            $actType = $this->_getActivityType(get_class($act));
+            $act->setType($actType);
         }
         if ($act->getPublisher() == null) {
             $userId = $this->container->get('security.context')->getToken()->getUser()->getId();
@@ -210,19 +270,20 @@ class ActivityManager
             $act->setCreatedAt(time());
         }
 
-        // $act_types = $this->container->getParameter('kl_feed.types');
+        // $actTypes = $this->container->getParameter('kl_feed.types');
         
         $eventDispatcher = $this->container->get('event_dispatcher');
         $eventDispatcher->dispatch('kl_feed.pre_save_activity', new PreSaveActivityEvent($act));
         
-        // @todo if actKey already exist, delete it first
-        $actKey = $act->generateKey();
+        // if actKey already exist, delete it first
+        $actKey = $this->_generateActivityKey($act);
         // if ($this->redis->get($actKey) // delete will check whether it exists or not
         $this->delete($actKey);
         
+        $globalSub = $this->container->getParameter('kl_feed.global_subscribe');
+        
         $am = $this;
-        $this->redis->pipeline(function($pipe) use ($act, $actKey, $am) {
-            $actKey = $am->getActivityRedisKey($actKey);
+        $this->redis->pipeline(function($pipe) use ($act, $actKey, $am, $globalSub) {
             $pipe->set($actKey, serialize($act));
             //$actId = $act->getId();
             //$actKeyId = "act:$actId";
@@ -231,6 +292,10 @@ class ActivityManager
 
             $publisher = $act->getPublisher();
             $pipe->lpush($am->getPublishedFeedKey($publisher), $actKey);
+            
+            if ($globalSub) {
+                $pipe->lpush($am->getGlobalFeedKey(), $actKey);
+            }
 
             $subscribers = $act->getSubscribers();
             if (empty($subscribers)) {
@@ -270,11 +335,16 @@ class ActivityManager
      * then the activity will not be deleted except its created
      * in the same time span
      * 
-     * @param string $actKey
+     * @param string|Activity $actKeyOrObj
      */
-    public function delete($actKey)
+    public function delete($actKeyOrObj)
     {
-        $actKey = $this->getActivityRedisKey($actKey);
+        $actKey = null;
+        if ($actKeyOrObj instanceof Activity) {
+            $actKey = $this->_generateActivityKey($actKeyOrObj);
+        } else {
+            $actKey = $actKeyOrObj;
+        }
         
         // $actKey = $act->generateKey();
         $existAct = $this->redis->get($actKey);
@@ -284,15 +354,51 @@ class ActivityManager
         
         $am = $this;
         $existAct = unserialize($existAct);
-        $this->redis->pipeline(function($pipe) use ($actKey, $existAct, $am) {
+        
+        $grpCount = 100;
+        if ($existAct instanceof ActionXYZActivity) {
+            $actGroupRef = $existAct->getActivityGroupRef();
+            $grpCount = $this->redis->llen($actGroupRef);
+        } else if ($existAct instanceof ABCActionActivity) {
+            $grpCount = $this->redis->pipeline(function($pipe) use ($actKey, $existAct, $am) {
+                $subscribers = $existAct->getSubscribers();
+                foreach ($subscribers as $subscriber) {
+                    $feedKey = $am->getSubscribedFeedKey($subscriber);
+                    $actGroupRef = $existAct->getActivityGroupRef($subscriber);
+                    $pipe->llen($actGroupRef);
+                }
+            });
+        }
+        
+        $globalSub = $this->container->getParameter('kl_feed.global_subscribe');
+        $this->redis->pipeline(function($pipe) use ($actKey, $existAct, $am, $grpCount, $globalSub) {
+            if ($globalSub) {
+                $pipe->lrem($am->getGlobalFeedKey(), 1, $actKey);
+            }
+            
             $subscribers = $existAct->getSubscribers();
             if ($existAct instanceof ActionXYZActivity) {
-                $actionXYZ_ref = $existAct->getActivityGroupRef();
-                $pipe->lrem($actionXYZ_ref, 1, $actKey);
+                $actGroupRef = $existAct->getActivityGroupRef();
+                $pipe->lrem($actGroupRef, 1, $actKey);
+                
+                // the group will be empty if the activity is deleted
+                if ($grpCount == 1) {
+                    $subscribers = $existAct->getSubscribers();
+                    foreach ($subscribers as $subscriber) {
+                        $feedKey = $am->getSubscribedFeedKey($subscriber);
+                        $pipe->lrem($feedKey, 1, $actGroupRef);
+                    }
+                }
             } else if ($existAct instanceof ABCActionActivity) {
-                foreach ($subscribers as $subscriber) {
-                    $abcAction_ref = $existAct->getActivityGroupRef($subscriber);
-                    $pipe->lrem($abcAction_ref, 1, $actKey);
+                for ($i=0, $c=count($subscribers); $i<$c; ++$i) {
+                    $subscriber = $subscribers[$i];
+                    $actGroupRef = $existAct->getActivityGroupRef($subscriber);
+                    $pipe->lrem($actGroupRef, 1, $actKey);
+                    
+                    if ($grpCount[$i] == 1) {
+                        $feedKey = $am->getSubscribedFeedKey($subscriber);
+                        $pipe->lrem($feedKey, 1, $actGroupRef);
+                    }
                 }
             } else {
                 foreach ($subscribers as $subscriber) {
@@ -341,37 +447,26 @@ class ActivityManager
         	if (is_array($actGrp)) {
         		$act1 = $actGrp[0];
         		$template = $act1->getTemplate();
-        		if ($act1 instanceof ABCActionActivity) {
-        			$publishers = array();
-        			foreach ($actGrp as $act) {
-        				$publishers[] = $allPublishers[$act->getPublisher()];
-        			}
-        			$tplVariables = array(
-        			    'type'       => $act1->getType(),
-        			    'publishers' => $publishers,
-        			    'created_at' => $act1->getCreatedAt(),
-        			    'target'     => $act1->getData(),
-        			);
-        		} else if ($act1 instanceof ActionXYZActivity) {
-        			$targets = array();
-        		    foreach ($actGrp as $act) {
-                        $targets[] = $act->getData();
-                    }
-                    $tplVariables = array(
-                        'type'       => $act1->getType(),
-                        'publisher'  => $allPublishers[$act1->getPublisher()],
-                        'created_at' => $act1->getCreatedAt(),
-                        'targets'    => $targets,
-                    );
-        		}
+        		$publishers = array();
+        		$targets = array();
+        		foreach ($actGrp as $act) {
+        		    $publishers[] = $allPublishers[$act->getPublisher()];
+                    $targets[] = $act->getTarget();
+                }
+                $tplVariables = array(
+                    'type'       => $act1->getType(),
+                    'publishers' => $publishers,
+                    'when'       => $act1->getCreatedAt(),
+                    'targets'    => $targets,
+                );
         	} else {
                 $act = $actGrp;
                 $template = $act->getTemplate();
                 $tplVariables = array(
                     'type'       => $act->getType(),
-                    'publisher'  => $allPublishers[$act->getPublisher()],
-                    'created_at' => $act->getCreatedAt(),
-                    'target'     => $act->getData(),
+                    'publishers' => array($allPublishers[$act->getPublisher()]),
+                    'when'       => $act->getCreatedAt(),
+                    'targets'    => array($act->getTarget()),
                 );
             }
         	

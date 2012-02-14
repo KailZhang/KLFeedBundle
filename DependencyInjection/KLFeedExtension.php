@@ -26,6 +26,7 @@ class KLFeedExtension extends Extension
         $loader->load('services.xml');
         
         $container->setParameter('kl_feed.usermanager_service', $config['usermanager_service']);
+        $container->setParameter('kl_feed.global_subscribe', $config['global_subscribe']);
         $feed_types = $config['types'];
         if ($feed_types === null) {
             // @todo feed is actually disabled
