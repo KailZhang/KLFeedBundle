@@ -94,6 +94,9 @@ class ActivityManager
     {
         $feedKey = $this->getSubscribedFeedKey($user);
         $actRefs = $this->redis->lrange($feedKey, $start, $nb);
+        if (empty($actRefs)) {
+            return array();
+        }
         $actRefTypes = $this->redis->pipeline(function($pipe) use ($actRefs) {
             foreach ($actRefs as $actRef) {
                 $pipe->type($actRef);
@@ -114,6 +117,10 @@ class ActivityManager
         });
         unset($actRefs);
         unset($actRefTypes);
+        
+        if (empty($actKeys)) {
+            return array();
+        }
 
         // chances are $serialized_acts is 2-dimension array
         $serialized_acts = $this->redis->pipeline(function($pipe) use ($actKeys) {
