@@ -116,6 +116,10 @@ class ActivityManager
     {
         $feedKey = $this->getSubscribedFeedKey($user);
         $actRefs = $this->redis->lrange($feedKey, $start, $nb - 1);
+        if (empty($actRefs)) {
+            return array();
+        }
+        
         $actRefTypes = $this->redis->pipeline(function($pipe) use ($actRefs) {
             foreach ($actRefs as $actRef) {
                 $pipe->type($actRef);
@@ -137,6 +141,10 @@ class ActivityManager
         });
         unset($actRefs);
         unset($actRefTypes);
+        
+        if (empty($actKeys)) {
+            return array();
+        }
 
         // chances are $serialized_acts is 2-dimension array
         $serialized_acts = $this->redis->pipeline(function($pipe) use ($actKeys) {
@@ -175,14 +183,14 @@ class ActivityManager
      */
     private function _getActivityType($actClsname)
     {
-        $actTypes = $this->container->getParameter('kl_feed.types');
-        $cls_arr = explode('\\', $actClsname);
-        $actCls = array_pop($cls_arr);
-        if (!in_array($actCls, $actTypes)) {
-            throw new \Exception('Please add activity ' . $actCls . ' to config.yml');
+        $actTypeArrs = $this->container->getParameter('kl_feed.types');
+        $actType = null;
+        foreach ($actTypeArrs as $actTypeArr) {
+            if ($actTypeArr['class'] == $actClsname) {
+                $actType = $actTypeArr['type'];
+                break;
+            }
         }
-        $flippedTypes = array_flip($actTypes);
-        $actType = (int)$flippedTypes[$actCls];
         
         return $actType;
     }
